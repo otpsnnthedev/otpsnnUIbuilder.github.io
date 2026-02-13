@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>otpsnn UI Tool v1 - Full Systems</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { background-color: #09090b; margin: 0; overflow: hidden; touch-action: none; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .select-none { user-select: none; -webkit-user-select: none; }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback } = React;
+
+        const App = () => {
+          // --- ระบบจัดการข้อมูล (State Management) ---
+          const [elements, setElements] = useState(() => {
+            const saved = localStorage.getItem('otpsnn_v15_production_save');
+            return saved ? JSON.parse(saved) : [
+              { id: 'root-gui', name: "MainGui", type: "ScreenGui", visible: true, zIndex: 1, parentId: null, effects: [] }
+            ];
+          });
+          
+          const [selectedId, setSelectedId] = useState('root-gui');
+          const [showCode, setShowCode] = useState(false);
+          const [activeTab, setActiveTab] = useState('Data');
+          const [explorerWidth, setExplorerWidth] = useState(220);
+          const [propertiesWidth, setPropertiesWidth] = useState(300);
+
+          const interactionRef = useRef({ active: false, mode: null, startX: 0, startY: 0, initialEl: null, initialWidth: 0 });
+          const selectedElement = elements.find(el => el.id === selectedId) || elements[0];
+
+          useEffect(() => {
+            localStorage.setItem('otpsnn_v15_production_save', JSON.stringify(elements));
+          }, [elements]);
+
+          // --- ระบบจัดการ Element ---
+          const addElement = (type) => {
+            const newEl = {
+              id: "el-" + Date.now(),
+              name: type + "_" + elements.length,
+              type: type,
+              width: type === 'ScrollingFrame' ? 200 : (type === 'Frame' ? 100 : 150),
+              height: type === 'ScrollingFrame' ? 250 : (type === 'Frame' ? 100 : 50),
+              x: 200, y: 200, rotation: 0,
+              color: type.includes('Button') ? "#3b82f6" : (type.includes('Frame') ? "#27272a" : "#18181b"),
+              text: (type.includes('Label') || type.includes('Button')) ? "Label" : "",
+              zIndex: elements.length + 1, parentId: 'root-gui',
+              effects: []
+            };
+            setElements(prev => [...prev, newEl]);
+            setSelectedId(newEl.id);
+          };
+
+          const updateSelected = (key, val) => {
+            setElements(prev => prev.map(el => el.id === selectedId ? { ...el, [key]: val } : el));
+          };
+
+          // --- ระบบ Effects (UIStroke, UICorner, UIGradient) ---
+          const addEffect = (effectType) => {
+            if (selectedId === 'root-gui') return;
+            setElements(prev => prev.map(el => {
+              if (el.id !== selectedId) return el;
+              if (el.effects.some(ef => ef.type === effectType)) return el;
+              return { 
+                ...el, 
+                effects: [...el.effects, { 
+                    type: effectType, 
+                    color: "#ffffff", 
+                    thickness: 2, 
+                    cornerRadius: 8, 
+                    gradientColor1: "#3b82f6", 
+                    gradientColor2: "#1e1e2e", 
+                    rotation: 45 
+                }] 
+              };
+            }));
+          };
+
+          const removeEffect = (effectType) => {
+            setElements(prev => prev.map(el => el.id === selectedId ? { ...el, effects: el.effects.filter(ef => ef.type !== effectType) } : el));
+          };
+
+          const updateEffect = (effectType, key, val) => {
+            setElements(prev => prev.map(el => {
+              if (el.id !== selectedId) return el;
+              return { ...el, effects: el.effects.map(ef => ef.type === effectType ? { ...ef, [key]: val } : ef) };
+            }));
+          };
+
+          // --- ระบบโต้ตอบ (Interaction) ---
+          const handlePointerDown = (e, mode, el) => {
+            e.stopPropagation();
+            interactionRef.current = { 
+              active: true, mode, startX: e.clientX, startY: e.clientY, 
+              initialEl: el ? { ...el } : null,
+              initialWidth: mode === 'resizingExplorer' ? explorerWidth : propertiesWidth
+            };
+            if (el) setSelectedId(el.id);
+          };
+
+          const handleGlobalMove = useCallback((e) => {
+            const inter = interactionRef.current;
+            if (!inter.active) return;
+
+            if (inter.mode === 'resizingExplorer') { setExplorerWidth(Math.max(120, inter.initialWidth + (e.clientX - inter.startX))); return; }
+            if (inter.mode === 'resizingProperties') { setPropertiesWidth(Math.max(150, inter.initialWidth + (inter.startX - e.clientX))); return; }
+            if (!inter.initialEl) return;
+
+            setElements(prev => prev.map(el => {
+              if (el.id !== inter.initialEl.id) return el;
+              const dx = e.clientX - inter.startX;
+              const dy = e.clientY - inter.startY;
+              if (inter.mode === 'move') return { ...el, x: inter.initialEl.x + dx, y: inter.initialEl.y + dy };
+              if (inter.mode === 'scale') return { ...el, width: Math.max(5, inter.initialEl.width + dx), height: Math.max(5, inter.initialEl.height + dy) };
+              if (inter.mode === 'rotate') return { ...el, rotation: (inter.initialEl.rotation + dy) % 360 };
+              return el;
+            }));
+          }, [explorerWidth, propertiesWidth]);
+
+          // --- การสร้างสคริปต์ LUAU ---
+          const generateLua = () => {
+            let script = "-- OTPSNN UI v15\nlocal GUI = Instance.new(\"ScreenGui\", game.Players.LocalPlayer:WaitForChild(\"PlayerGui\"))\nGUI.Name = \"OTPSNN_UI\"\n\n";
+            elements.filter(e => e.id !== 'root-gui').forEach(el => {
+              const parentVar = elements.find(p => p.id === el.parentId)?.id !== 'root-gui' ? elements.find(p => p.id === el.parentId).name : "GUI";
+              script += `local ${el.name} = Instance.new("${el.type}")\n${el.name}.Name = "${el.name}"\n${el.name}.Size = UDim2.new(0, ${Math.round(el.width)}, 0, ${Math.round(el.height)})\n${el.name}.Position = UDim2.new(0, ${Math.round(el.x)}, 0, ${Math.round(el.y)})\n${el.name}.BackgroundColor3 = Color3.fromHex("${el.color}")\n`;
+              el.effects.forEach(ef => {
+                if (ef.type === 'UIStroke') script += `Instance.new("UIStroke", ${el.name}).Color = Color3.fromHex("${ef.color}"); ${el.name}.UIStroke.Thickness = ${ef.thickness}\n`;
+                if (ef.type === 'UICorner') script += `Instance.new("UICorner", ${el.name}).CornerRadius = UDim.new(0, ${ef.cornerRadius})\n`;
+                if (ef.type === 'UIGradient') script += `local g = Instance.new("UIGradient", ${el.name}); g.Color = ColorSequence.new(Color3.fromHex("${ef.gradientColor1}"), Color3.fromHex("${ef.gradientColor2}")); g.Rotation = ${ef.rotation}\n`;
+              });
+              script += `${el.name}.Parent = ${parentVar}\n\n`;
+            });
+            return script;
+          };
+
+          const getStyle = (el) => {
+            const stroke = el.effects.find(e => e.type === 'UIStroke');
+            const corner = el.effects.find(e => e.type === 'UICorner');
+            const grad = el.effects.find(e => e.type === 'UIGradient');
+            return {
+              width: el.width, height: el.height, left: el.x, top: el.y,
+              transform: `translate(-50%, -50%) rotate(${el.rotation}deg)`,
+              backgroundColor: el.color,
+              borderRadius: corner ? corner.cornerRadius + "px" : '0px',
+              border: stroke ? `${stroke.thickness}px solid ${stroke.color}` : 'none',
+              background: grad ? `linear-gradient(${grad.rotation + 90}deg, ${grad.gradientColor1}, ${grad.gradientColor2})` : el.color,
+              zIndex: el.zIndex,
+              position: 'absolute'
+            };
+          };
+
+          return (
+            <div className="flex flex-col h-screen bg-[#09090b] text-zinc-400 font-sans overflow-hidden select-none" 
+                 onPointerMove={handleGlobalMove} 
+                 onPointerUp={() => interactionRef.current.active = false}>
+              
+              <header className="h-14 border-b border-white/5 bg-zinc-950 flex items-center justify-between px-4 shrink-0">
+                <div className="bg-blue-600 text-white font-black px-2 py-0.5 rounded italic text-xs uppercase">OTPSNN V15</div>
+                <button onClick={() => setShowCode(true)} className="px-4 py-1.5 bg-blue-600 text-white rounded text-[10px] font-black uppercase shadow-lg shadow-blue-600/20">Get Script</button>
+              </header>
+
+              <div className="h-10 border-b border-white/5 bg-zinc-950/50 flex items-center px-4 gap-2 overflow-x-auto no-scrollbar">
+                {['Frame', 'TextLabel', 'TextButton', 'ImageLabel', 'TextBox', 'ScrollingFrame'].map(t => (
+                  <button key={t} onClick={() => addElement(t)} className="px-2 py-1 bg-zinc-900 border border-white/10 rounded text-[9px] hover:bg-zinc-800 font-bold uppercase shrink-0">{t}</button>
+                ))}
+              </div>
+
+              <div className="flex-1 flex overflow-hidden relative">
+                {/* Explorer */}
+                <aside style={{ width: explorerWidth }} className="bg-zinc-950 border-r border-white/5 overflow-y-auto shrink-0 relative">
+                  <div className="p-3 text-[9px] font-black text-zinc-600 uppercase border-b border-white/5 tracking-widest">Explorer</div>
+                  {elements.map(el => (
+                    <div key={el.id} onClick={() => setSelectedId(el.id)} 
+                         className={`p-2.5 px-4 text-[11px] cursor-pointer border-b border-white/5 transition-colors ${selectedId === el.id ? 'bg-blue-600/10 text-blue-400 border-l-2 border-blue-500' : 'hover:bg-white/5'}`}>
+                      {el.name} <span className="text-[8px] opacity-20 ml-2 uppercase">{el.type}</span>
+                    </div>
+                  ))}
+                  <div onPointerDown={(e) => handlePointerDown(e, 'resizingExplorer')} className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500/50" />
+                </aside>
+
+                {/* Canvas Area */}
+                <main className="flex-1 bg-[#0c0c0e] relative overflow-hidden" onPointerDown={() => setSelectedId('root-gui')}>
+                   <div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '32px 32px'}}></div>
+                  {elements.map(el => el.id !== 'root-gui' && (
+                    <div key={el.id} onPointerDown={(e) => { e.stopPropagation(); setSelectedId(el.id); }} style={getStyle(el)} className="flex items-center justify-center group">
+                      <div className="w-full h-full flex items-center justify-center text-center p-2 font-bold text-[10px] pointer-events-none uppercase overflow-hidden text-white drop-shadow-md">
+                        {!el.type.includes('Frame') && el.text}
+                      </div>
+                      {selectedId === el.id && (
+                        <>
+                          <div className="absolute inset-0 cursor-move border border-blue-500/50" onPointerDown={(e) => handlePointerDown(e, 'move', el)} />
+                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-white border-2 border-blue-600 rounded-full cursor-nwse-resize z-50 shadow-xl" onPointerDown={(e) => handlePointerDown(e, 'scale', el)} />
+                          <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[8px] px-2 py-0.5 rounded font-bold">{Math.round(el.width)}x{Math.round(el.height)}</div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </main>
+
+                {/* Properties */}
+                <aside style={{ width: propertiesWidth }} className="bg-zinc-950 border-l border-white/5 overflow-y-auto shrink-0 relative">
+                  <div onPointerDown={(e) => handlePointerDown(e, 'resizingProperties')} className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-blue-500/50" />
+                  <div className="flex border-b border-white/5">
+                    {['Data', 'Effects'].map(t => (
+                      <button key={t} onClick={() => setActiveTab(t)} className={`flex-1 p-3 text-[9px] font-black uppercase tracking-widest ${activeTab === t ? 'text-blue-400 bg-blue-500/5 border-b-2 border-blue-500' : 'text-zinc-600'}`}>{t}</button>
+                    ))}
+                  </div>
+                  
+                  <div className="p-4 space-y-5">
+                    {selectedId === 'root-gui' ? (
+                        <div className="text-center opacity-20 text-[10px] py-20 font-black uppercase italic">MainGui Selected</div>
+                    ) : (
+                      activeTab === 'Data' ? (
+                        <div className="space-y-4">
+                          <div><label className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">Name</label><input type="text" value={selectedElement.name} onChange={(e) => updateSelected('name', e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded p-2 text-xs text-white focus:border-blue-500 outline-none" /></div>
+                          
+                          {/* Parent System */}
+                          <div>
+                            <label className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">Parent (ที่อยู่)</label>
+                            <select value={selectedElement.parentId} onChange={(e) => updateSelected('parentId', e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded p-2 text-xs text-white outline-none">
+                              {elements.filter(e => e.id !== selectedId && (e.type.includes('Frame') || e.id === 'root-gui')).map(e => (
+                                <option key={e.id} value={e.id}>{e.name} ({e.type})</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div><label className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">Color</label><input type="color" value={selectedElement.color} onChange={(e) => updateSelected('color', e.target.value)} className="w-full h-10 bg-zinc-900 border border-white/10 p-1 rounded cursor-pointer" /></div>
+                          <div><label className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">Text / Content</label><input type="text" value={selectedElement.text} onChange={(e) => updateSelected('text', e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded p-2 text-xs text-white focus:border-blue-500 outline-none" /></div>
+                          <div><label className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">Rotation</label><input type="range" min="0" max="360" value={selectedElement.rotation} onChange={(e) => updateSelected('rotation', parseInt(e.target.value))} className="w-full" /></div>
+                          
+                          <button onClick={() => { setElements(elements.filter(e => e.id !== selectedId)); setSelectedId('root-gui'); }} className="w-full py-2 bg-red-600/10 text-red-500 rounded border border-red-600/20 text-[9px] font-black uppercase hover:bg-red-600 hover:text-white transition-all">Destroy Element</button>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-3 gap-1">
+                            {['UIStroke', 'UICorner', 'UIGradient'].map(ef => (
+                              <button key={ef} onClick={() => addEffect(ef)} className="p-2 bg-zinc-900 border border-white/10 rounded text-[7px] text-white font-black uppercase hover:bg-blue-600 transition-colors">+{ef}</button>
+                            ))}
+                          </div>
+                          {selectedElement.effects.map(ef => (
+                            <div key={ef.type} className="p-3 bg-zinc-900 border border-white/5 rounded-lg space-y-3 relative overflow-hidden">
+                              <div className="flex justify-between items-center border-b border-white/5 pb-2 mb-2">
+                                <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">{ef.type}</span>
+                                <button onClick={() => removeEffect(ef.type)} className="text-[8px] text-red-500 font-bold">REMOVE</button>
+                              </div>
+                              {ef.type === 'UIStroke' && (
+                                <div className="space-y-2">
+                                  <label className="text-[7px] uppercase font-bold text-zinc-500">Thickness / Color</label>
+                                  <input type="number" value={ef.thickness} onChange={(e) => updateEffect(ef.type, 'thickness', parseInt(e.target.value))} className="w-full bg-zinc-800 text-[10px] p-1.5 rounded outline-none border border-white/5" />
+                                  <input type="color" value={ef.color} onChange={(e) => updateEffect(ef.type, 'color', e.target.value)} className="w-full h-6 rounded cursor-pointer" />
+                                </div>
+                              )}
+                              {ef.type === 'UICorner' && (
+                                <div className="space-y-2">
+                                  <label className="text-[7px] uppercase font-bold text-zinc-500">Radius (ความโค้ง)</label>
+                                  <input type="number" value={ef.cornerRadius} onChange={(e) => updateEffect(ef.type, 'cornerRadius', parseInt(e.target.value))} className="w-full bg-zinc-800 text-[10px] p-1.5 rounded outline-none border border-white/5" />
+                                  <input type="range" min="0" max="100" value={ef.cornerRadius} onChange={(e) => updateEffect(ef.type, 'cornerRadius', parseInt(e.target.value))} className="w-full" />
+                                </div>
+                              )}
+                              {ef.type === 'UIGradient' && (
+                                <div className="space-y-2">
+                                  <label className="text-[7px] uppercase font-bold text-zinc-500">Gradient Colors</label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input type="color" value={ef.gradientColor1} onChange={(e) => updateEffect(ef.type, 'gradientColor1', e.target.value)} className="w-full h-8 cursor-pointer" />
+                                    <input type="color" value={ef.gradientColor2} onChange={(e) => updateEffect(ef.type, 'gradientColor2', e.target.value)} className="w-full h-8 cursor-pointer" />
+                                  </div>
+                                  <input type="range" min="0" max="360" value={ef.rotation} onChange={(e) => updateEffect(ef.type, 'rotation', parseInt(e.target.value))} className="w-full mt-2" />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </aside>
+              </div>
+
+              {/* Script Modal */}
+              {showCode && (
+                <div className="fixed inset-0 bg-black/95 z-[100] p-4 flex items-center justify-center backdrop-blur-sm">
+                  <div className="w-full max-w-4xl flex flex-col h-[85vh] bg-zinc-950 border border-white/10 rounded-[2rem] overflow-hidden shadow-2xl">
+                    <div className="p-6 border-b border-white/5 flex justify-between items-center">
+                      <div>
+                        <h2 className="font-black text-xl italic text-white uppercase tracking-tighter">Luau Script</h2>
+                        <p className="text-[8px] text-zinc-500 font-bold uppercase tracking-widest">Ready to paste into Roblox Studio</p>
+                      </div>
+                      <button onClick={() => setShowCode(false)} className="px-6 py-2 bg-zinc-800 hover:bg-white hover:text-black rounded-full text-[10px] font-black transition-all">CLOSE</button>
+                    </div>
+                    <textarea readOnly className="flex-1 bg-black p-8 font-mono text-[11px] text-blue-400 outline-none resize-none" value={generateLua()} />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
